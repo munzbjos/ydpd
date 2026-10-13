@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historical Natural Hazard Events – NOAA HazEL</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.28.1/mapbox-gl.css" rel="stylesheet">
+<style>
+  :root { --ink:#1f2933; --muted:#5f6b76; --line:#d9dee3; --bg:#f7f8fa; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  header { padding: 8px 14px; background: #fff; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 1.05rem; }
+  header p { margin: 2px 0 0; font-size: .8rem; color: var(--muted); }
+  #map { flex: 1 1 auto; min-height: 0; background: #dfe3e6; }
+  footer { padding: 6px 14px; background: #fff; border-top: 1px solid var(--line); font-size: .72rem; color: var(--muted); max-height: 24vh; overflow: auto; }
+  footer p { margin: 2px 0; }
+  footer a { color: #1d5fa8; }
+
+  #error-banner { display: none; padding: 8px 14px; background: #fde8e8; color: #8a1c1c; border-bottom: 1px solid #f3b8b8; font-size: .85rem; }
+
+  /* Legend + layer toggles */
+  .legend { background: rgba(255,255,255,.95); padding: 8px 10px; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.3); min-width: 190px; }
+  .legend h2 { margin: 0 0 4px; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .legend label { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; font-size: .85rem; }
+  .legend svg { flex: none; }
+  .legend .count { margin-left: auto; font-size: .72rem; color: var(--muted); padding-left: 8px; }
+  .legend .count.err { color: #b00020; font-weight: 600; }
+  .reset-btn { background: #fff; border: 2px solid rgba(0,0,0,.25); border-radius: 4px; padding: 5px 8px; font: inherit; font-size: .8rem; cursor: pointer; }
+  .reset-btn:hover { background: #f1f1f1; }
+
+  /* Time slider (dual-handle year range) */
+  #timebar { padding: 6px 18px 8px; background: #fff; border-top: 1px solid var(--line); }
+  .tb-head { display: flex; justify-content: space-between; gap: 10px; font-size: .85rem; }
+  .tb-slider { position: relative; height: 26px; margin: 2px 8px 0; }
+  .tb-track { position: absolute; left: 0; right: 0; top: 11px; height: 4px; background: #d9dee3; border-radius: 2px; }
+  .tb-fill { position: absolute; top: 0; bottom: 0; background: #1d5fa8; border-radius: 2px; }
+  .tb-slider input[type=range] { position: absolute; left: -8px; width: calc(100% + 16px); top: 0; margin: 0; height: 26px; background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+  .tb-slider input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 26px; }
+  .tb-slider input[type=range]::-moz-range-track { background: transparent; height: 26px; }
+  .tb-slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 16px; height: 16px; margin-top: 5px; border-radius: 50%; background: #fff; border: 2px solid #1d5fa8; cursor: pointer; }
+  .tb-slider input[type=range]::-moz-range-thumb { pointer-events: auto; box-sizing: content-box; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #1d5fa8; cursor: pointer; }
+  .tb-slider input[type=range]:disabled { opacity: .45; }
+  .tb-slider input[type=range]:focus-visible::-webkit-slider-thumb { outline: 2px solid #1d5fa8; outline-offset: 2px; }
+  .tb-note { margin: 0; font-size: .68rem; color: var(--muted); }
+
+  /* Popups */
+  .mapboxgl-popup-content { padding: 12px 14px; font-family: inherit; }
+  .pp h3 { margin: 0 0 2px; font-size: 1rem; line-height: 1.25; }
+  .pp .pp-type { margin: 0 0 8px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .pp dl { margin: 0 0 8px; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
+  .pp dt { color: var(--muted); }
+  .pp dd { margin: 0; font-weight: 600; }
+  .pp h4 { margin: 8px 0 3px; padding-top: 7px; border-top: 1px solid var(--line); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .pp ul { margin: 0; padding: 0; list-style: none; }
+  .pp li span { font-weight: 600; }
+  .pp .note { margin: 0; color: var(--muted); font-style: italic; }
+
+  @media (max-width: 600px) {
+    header p { display: none; }
+    .legend { min-width: 0; padding: 6px 8px; }
+    .legend label { font-size: .8rem; }
+    footer { font-size: .68rem; max-height: 30vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Historical Natural Hazard Events</h1>
+  <p>Earthquakes, tsunamis and volcanic eruptions from NOAA HazEL. Click a symbol for details.</p>
+</header>
+<div id="error-banner" role="alert"></div>
+<div id="map" aria-label="Interactive world map of historical earthquake, tsunami and volcano events"></div>
+<div id="timebar">
+  <div class="tb-head"><strong>Year filter</strong><span id="time-label">Loading data…</span></div>
+  <div class="tb-slider">
+    <div class="tb-track"><div class="tb-fill" id="time-fill" style="left:0;width:100%"></div></div>
+    <input type="range" id="year-lo" min="0" max="1000" step="1" value="0" disabled aria-label="Earliest year shown">
+    <input type="range" id="year-hi" min="0" max="1000" step="1" value="1000" disabled aria-label="Latest year shown">
+  </div>
+  <p class="tb-note">Non-linear scale (finer steps for recent years). While the range is narrowed, events with no reported year are hidden.</p>
+</div>
+<footer>
+  <p><strong>Source:</strong> NOAA National Centers for Environmental Information, <a href="https://www.ngdc.noaa.gov/hazel/view/about" target="_blank" rel="noopener">Hazard Event Location (HazEL)</a>; data read live from public ArcGIS Online Feature Services (<a href="https://services2.arcgis.com/LlQJoYHf9cwrM7NJ/arcgis/rest/services/earthquakes/FeatureServer/0" target="_blank" rel="noopener">earthquakes</a>, <a href="https://services2.arcgis.com/LlQJoYHf9cwrM7NJ/arcgis/rest/services/tsunamis/FeatureServer/0" target="_blank" rel="noopener">tsunamis</a>, <a href="https://services2.arcgis.com/LlQJoYHf9cwrM7NJ/arcgis/rest/services/eruptions/FeatureServer/0" target="_blank" rel="noopener">eruptions</a>).</p>
+  <p><strong>Limitations:</strong> These datasets are not a complete list of hazard events worldwide. Historical records vary in completeness and reliability across time and place, and older or remote events are more likely to be missing or imprecise. “Not reported” means the value is absent from the record, not zero.</p>
+  <p>Prompt template licensed CC BY 4.0. Based on Ian Muehlenhaus, www.promptcartography.com.</p>
+</footer>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.28.1/mapbox-gl.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- 0. Your Mapbox access token (free account: https://account.mapbox.com) ---------- */
+  // Mapbox maps always need a token. Use a public (pk.) token restricted to your own URL,
+  // because anything in this file is public.
+  const MAPBOX_TOKEN = 'pk.eyJ1IjoibXVuemJqb3MiLCJhIjoiY212NzV6NHBkMGdmcDJ6cjBmeDg5eHRvNCJ9.JekGHoZZvbCiY6wgfl92iA';
+
+  /* ---------- 1. Layer configuration (edit colors, sizes, URLs here) ---------- */
+  const SYMBOL_RADIUS = 6; // pixels; same for every event
+
+  const LAYERS = [
+    {
+      id: 'earthquakes', label: 'Earthquake Events', typeName: 'Earthquake Event',
+      url: 'https://services2.arcgis.com/LlQJoYHf9cwrM7NJ/arcgis/rest/services/earthquakes/FeatureServer/0',
+      fields: ['FID', 'Location_Name', 'Year', 'Mo', 'Dy', 'Mag', 'Deaths', 'Missing', 'Injuries'],
+      shape: 'square', fill: '#f28e2b', stroke: '#5a2d00',
+      intensity: { field: 'Mag', label: 'Magnitude', decimals: 2 }
+    },
+    {
+      id: 'tsunamis', label: 'Tsunami Events', typeName: 'Tsunami Event',
+      url: 'https://services2.arcgis.com/LlQJoYHf9cwrM7NJ/arcgis/rest/services/tsunamis/FeatureServer/0',
+      fields: ['FID', 'Location_Name', 'Country', 'Year', 'Mo', 'Dy', 'Maximum_Water_Height__m_', 'Deaths', 'Missing', 'Injuries'],
+      shape: 'circle', fill: '#1f78d1', stroke: '#08306b',
+      intensity: { field: 'Maximum_Water_Height__m_', label: 'Maximum water height (m)', decimals: 2 }
+    },
+    {
+      id: 'volcanoes', label: 'Volcano Events', typeName: 'Volcano Event',
+      url: 'https://services2.arcgis.com/LlQJoYHf9cwrM7NJ/arcgis/rest/services/eruptions/FeatureServer/0',
+      fields: ['FID', 'Name', 'Location', 'Country', 'Year', 'Mo', 'Dy', 'VEI', 'Deaths', 'Missing', 'Injuries'],
+      shape: 'triangle', fill: '#000000', stroke: '#ffffff',
+      intensity: { field: 'VEI', label: 'Volcanic Explosivity Index (VEI)', decimals: 0 }
+    }
+  ];
+
+  /* ---------- 2. Small helpers ---------- */
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const text = v => (v === null || v === undefined) ? '' : String(v).trim();
+  // A value counts as "reported" only if it is a real number (0 is reported; null/blank is not).
+  const isReported = v => v !== null && v !== undefined && String(v).trim() !== '' && Number.isFinite(Number(v));
+  const fmt = (v, decimals) => Number(v).toLocaleString('en-US', { maximumFractionDigits: decimals });
+
+  function formatDate(a) {
+    // Built from plain numbers/strings on purpose: JavaScript Date would distort historical (and BCE) years.
+    if (!isReported(a.Year)) return 'Date not reported';
+    const y = Number(a.Year);
+    const yearTxt = y < 0 ? (-y) + ' BCE' : String(y);
+    const m = isReported(a.Mo) ? Number(a.Mo) : null;
+    const d = isReported(a.Dy) ? Number(a.Dy) : null;
+    const monthOk = m !== null && Number.isInteger(m) && m >= 1 && m <= 12;
+    if (!monthOk) return yearTxt;                       // year only
+    const dayOk = d !== null && Number.isInteger(d) && d >= 1 && d <= 31;
+    if (dayOk) return d + ' ' + MONTHS[m - 1] + ' ' + yearTxt; // full date
+    return MONTHS[m - 1] + ' ' + yearTxt;               // month + year
+  }
+
+  // "CHINA: SICHUAN PROVINCE" -> "Sichuan Province, China"
+  function titleCase(s) {
+    const small = new Set(['of', 'and', 'the', 'in', 'on', 'at', 'de', 'la', 'del']);
+    return s.replace(/[^\s\-\/()]+/g, (word, offset) => {
+      const w = word.toLowerCase();
+      return (offset > 0 && small.has(w)) ? w : w.charAt(0).toUpperCase() + w.slice(1);
+    });
+  }
+  function earthquakeTitle(raw) {
+    const s = text(raw);
+    if (!s) return '';
+    const i = s.indexOf(':');                       // split at the first colon only
+    if (i === -1) return titleCase(s);
+    const state = s.slice(0, i).trim(), place = s.slice(i + 1).trim();
+    return [place && titleCase(place), state && titleCase(state)].filter(Boolean).join(', ');
+  }
+
+  function popupTitle(cfg, a) {
+    let parts = [];
+    if (cfg.id === 'earthquakes') {
+      parts = [earthquakeTitle(a.Location_Name)];
+    } else if (cfg.id === 'tsunamis') {
+      parts = [text(a.Location_Name), text(a.Country)];
+    } else {
+      parts = [text(a.Name) || text(a.Location), text(a.Country)];
+    }
+    parts = parts.filter(Boolean);
+    // Avoid "X, X" when the two parts are identical
+    parts = parts.filter((p, i) => parts.findIndex(q => q.toLowerCase() === p.toLowerCase()) === i);
+    return parts.length ? parts.join(', ') : 'Location not reported';
+  }
+
+  function humanImpactHtml(a) {
+    const items = [['Deaths', a.Deaths], ['Missing', a.Missing], ['Injuries', a.Injuries]];
+    const reported = items.filter(([, v]) => isReported(v));
+    let body;
+    if (reported.length === 0) {
+      body = '<p class="note">Human impact data unavailable.</p>';
+    } else if (reported.length === 3 && reported.every(([, v]) => Number(v) === 0)) {
+      body = '<p class="note">No human impact reported.</p>';
+    } else {
+      body = '<ul>' + reported.map(([k, v]) => '<li>' + k + ': <span>' + fmt(v, 0) + '</span></li>').join('') + '</ul>';
+    }
+    return '<h4>Human Impact</h4>' + body;
+  }
+
+  function popupHtml(cfg, a) {
+    const iv = a[cfg.intensity.field];
+    const ivTxt = isReported(iv) ? fmt(iv, cfg.intensity.decimals) : 'Not reported';
+    return '<div class="pp">' +
+      '<h3>' + esc(popupTitle(cfg, a)) + '</h3>' +
+      '<p class="pp-type">' + esc(cfg.typeName) + '</p>' +
+      '<dl><dt>Event date</dt><dd>' + esc(formatDate(a)) + '</dd>' +
+      '<dt>' + esc(cfg.intensity.label) + '</dt><dd>' + esc(ivTxt) + '</dd></dl>' +
+      humanImpactHtml(a) + '</div>';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-banner');
+    el.style.display = 'block';
+    el.innerHTML += (el.innerHTML ? '<br>' : '') + esc(msg);
+    if (window.map) window.map.resize();
+  }
+
+  /* ---------- 3. Map and basemap (Mapbox Standard style, "monochrome" theme) ---------- */
+  // Initial view: Europe, as [[west, south], [east, north]] (edit to change the start extent)
+  const EUROPE_BOUNDS = [[-12, 34], [40, 62]];
+
+  if (!MAPBOX_TOKEN) {
+    showError('No Mapbox access token is set. Add yours to MAPBOX_TOKEN in the script; the Mapbox basemap cannot load without one, so the map is not drawn.');
+    document.getElementById('time-label').textContent = 'Year filter unavailable (map not loaded)';
+    return;
+  }
+
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/standard',
+    config: { basemap: { theme: 'monochrome' } },   // the "Monochrome" style from the Mapbox gallery
+    projection: 'globe',                            // globe when zoomed out, switches to Web Mercator when zoomed in
+    bounds: EUROPE_BOUNDS,
+    minZoom: 1, maxZoom: 14,
+    customAttribution: 'Data: <a href="https://www.ngdc.noaa.gov/hazel/view/about" target="_blank" rel="noopener">NOAA HazEL</a> via public ArcGIS Online Feature Services'
+  });
+  window.map = map;
+
+  const shownErrors = new Set();
+  map.on('error', e => {
+    const msg = (e && e.error && e.error.message) || 'unknown error';
+    if (shownErrors.has(msg)) return;
+    shownErrors.add(msg);
+    showError('Map error: ' + msg);
+  });
+
+  map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
+
+  /* Reset-view control */
+  class ResetControl {
+    onAdd(m) {
+      this._c = document.createElement('div');
+      this._c.className = 'mapboxgl-ctrl';
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'reset-btn'; b.textContent = '⟲ Reset view';
+      b.title = 'Return to the initial (Europe) view';
+      b.addEventListener('click', () => m.fitBounds(EUROPE_BOUNDS));
+      this._c.appendChild(b);
+      return this._c;
+    }
+    onRemove() { this._c.remove(); }
+  }
+  map.addControl(new ResetControl(), 'top-left');
+
+  /* ---------- 4. Legend + layer toggles ---------- */
+  function legendSymbol(cfg) {
+    const c = 10, r = SYMBOL_RADIUS; // same geometry as the map symbols
+    let shape;
+    if (cfg.shape === 'square') {
+      shape = `<rect x="${c - r * 0.9}" y="${c - r * 0.9}" width="${r * 1.8}" height="${r * 1.8}"`;
+    } else if (cfg.shape === 'triangle') {
+      shape = `<polygon points="${c},${c - r * 1.15} ${c + r * 1.05},${c + r * 0.85} ${c - r * 1.05},${c + r * 0.85}"`;
+    } else {
+      shape = `<circle cx="${c}" cy="${c}" r="${r}"`;
+    }
+    return `<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">${shape} fill="${cfg.fill}" fill-opacity="0.9" stroke="${cfg.stroke}" stroke-width="1.2"/></svg>`;
+  }
+
+  class LegendControl {
+    onAdd() {
+      this._c = document.createElement('div');
+      this._c.className = 'mapboxgl-ctrl legend';
+      this._c.innerHTML = '<h2>Event type (toggle)</h2>' + LAYERS.map(cfg =>
+        `<label><input type="checkbox" id="chk-${cfg.id}" checked disabled>${legendSymbol(cfg)}<span>${cfg.label}</span><span class="count" id="cnt-${cfg.id}">loading…</span></label>`
+      ).join('');
+      return this._c;
+    }
+    onRemove() { this._c.remove(); }
+  }
+  map.addControl(new LegendControl(), 'bottom-left');
+
+  /* ---------- 5. Event symbols (square / circle / triangle drawn on a canvas) ---------- */
+  function makeIcon(cfg) {
+    const css = 24, ratio = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = css * ratio;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    const x = css / 2, y = css / 2, r = SYMBOL_RADIUS;
+    ctx.beginPath();
+    if (cfg.shape === 'square') {
+      ctx.rect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
+    } else if (cfg.shape === 'triangle') {
+      ctx.moveTo(x, y - r * 1.15);
+      ctx.lineTo(x + r * 1.05, y + r * 0.85);
+      ctx.lineTo(x - r * 1.05, y + r * 0.85);
+      ctx.closePath();
+    } else {
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+    }
+    ctx.globalAlpha = 0.9; ctx.fillStyle = cfg.fill; ctx.fill();
+    ctx.globalAlpha = 1; ctx.lineWidth = 1.2; ctx.strokeStyle = cfg.stroke; ctx.stroke();
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  }
+
+  /* ---------- 6. Loading data with pagination ---------- */
+  const PAGE_SIZE = 2000; // the services' maxRecordCount
+  const STATES = [];      // one entry per layer: { cfg, features, years, cnt, total }
+  const filter = { full: true, lo: -Infinity, hi: Infinity }; // current year filter
+  // Events with no reported year can't be placed in time: shown only while the full range is selected
+  const inRange = year => filter.full || (year !== null && year >= filter.lo && year <= filter.hi);
+
+  async function loadPages(cfg, onPage) {
+    let offset = 0;
+    for (;;) {
+      const params = new URLSearchParams({
+        where: '1=1', outFields: cfg.fields.join(','), returnGeometry: 'true', outSR: '4326',
+        orderByFields: 'FID ASC', resultOffset: String(offset), resultRecordCount: String(PAGE_SIZE), f: 'json'
+      });
+      const res = await fetch(cfg.url + '/query?' + params.toString());
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error.message || 'Service returned an error');
+      const feats = json.features || [];
+      if (feats.length === 0) break;
+      onPage(feats);
+      offset += feats.length;
+      // Continue while the service says more records exist (or the page was full)
+      if (!json.exceededTransferLimit && feats.length < PAGE_SIZE) break;
+    }
+  }
+
+  function loadLayer(cfg) {
+    map.addImage('sym-' + cfg.id, makeIcon(cfg), { pixelRatio: 2 });
+    map.addSource(cfg.id, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: cfg.id, type: 'symbol', source: cfg.id, slot: 'top', // 'top' = above the basemap's labels
+      layout: { 'icon-image': 'sym-' + cfg.id, 'icon-allow-overlap': true, 'icon-ignore-placement': true }
+    });
+
+    const chk = document.getElementById('chk-' + cfg.id);
+    const cnt = document.getElementById('cnt-' + cfg.id);
+    const state = { cfg: cfg, features: [], years: [], cnt: cnt, total: 0 };
+    STATES.push(state);
+
+    chk.addEventListener('change', () => {
+      map.setLayoutProperty(cfg.id, 'visibility', chk.checked ? 'visible' : 'none');
+    });
+
+    const onPage = feats => {
+      feats.forEach(f => {
+        const g = f.geometry, a = f.attributes || {};
+        if (!g || !Number.isFinite(g.x) || !Number.isFinite(g.y) || Math.abs(g.y) > 90) return; // no usable point geometry
+        const year = isReported(a.Year) ? Number(a.Year) : null;
+        const props = Object.assign({}, a);
+        if (year !== null) props._year = year;             // numeric copy used only by the year filter
+        state.features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [g.x, g.y] }, properties: props });
+        state.years.push(year);
+      });
+      state.total = state.features.length;
+      map.getSource(cfg.id).setData({ type: 'FeatureCollection', features: state.features });
+      cnt.textContent = state.total.toLocaleString('en-US') + '…';
+    };
+
+    return loadPages(cfg, onPage).then(() => {
+      cnt.textContent = state.total.toLocaleString('en-US');
+      chk.disabled = false;
+    }).catch(err => {
+      cnt.textContent = 'load failed'; cnt.classList.add('err');
+      showError(cfg.label + ' could not be loaded (' + err.message + '). No substitute data is shown.');
+    });
+  }
+
+  /* ---------- 7. Popups ---------- */
+  const popup = new mapboxgl.Popup({ maxWidth: '300px', offset: 10 });
+
+  function visibleLayerIds() {
+    // top-most layer first, hidden layers excluded
+    return LAYERS.slice().reverse().map(l => l.id)
+      .filter(id => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
+  }
+  function featuresAt(point) {
+    const ids = visibleLayerIds();
+    if (!ids.length) return [];
+    const box = [[point.x - 8, point.y - 8], [point.x + 8, point.y + 8]]; // small tolerance for touch
+    return map.queryRenderedFeatures(box, { layers: ids });
+  }
+
+  map.on('click', e => {
+    const hits = featuresAt(e.point);
+    if (!hits.length) return;
+    const f = hits[0];
+    const cfg = LAYERS.find(l => l.id === f.layer.id);
+    const coords = f.geometry.coordinates.slice();
+    while (Math.abs(e.lngLat.lng - coords[0]) > 180) coords[0] += e.lngLat.lng > coords[0] ? 360 : -360; // nearest world copy
+    popup.setLngLat(coords).setHTML(popupHtml(cfg, f.properties)).addTo(map);
+  });
+  map.on('mousemove', e => {
+    map.getCanvas().style.cursor = featuresAt(e.point).length ? 'pointer' : '';
+  });
+
+  /* ---------- 8. Year slider (filters all layers by the Year attribute) ---------- */
+  const SCALE_POWER = 3; // 1 = linear; higher = more slider room for recent years
+  const yearLabel = y => (y < 0 ? (-y) + ' BCE' : String(y));
+
+  function applyFilter() {
+    STATES.forEach(s => {
+      map.setFilter(s.cfg.id, filter.full ? null :
+        ['all', ['has', '_year'], ['>=', ['get', '_year'], filter.lo], ['<=', ['get', '_year'], filter.hi]]);
+      let shown = 0;
+      s.years.forEach(y => { if (inRange(y)) shown++; });
+      s.cnt.textContent = filter.full ? s.total.toLocaleString('en-US')
+        : shown.toLocaleString('en-US') + ' of ' + s.total.toLocaleString('en-US');
+    });
+  }
+
+  function initTimeSlider() {
+    const label = document.getElementById('time-label');
+    let minY = Infinity, maxY = -Infinity;
+    STATES.forEach(s => s.years.forEach(y => {
+      if (y !== null) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    }));
+    if (!Number.isFinite(minY) || minY === maxY) { label.textContent = 'Year filter unavailable (no year values loaded)'; return; }
+
+    const lo = document.getElementById('year-lo'), hi = document.getElementById('year-hi');
+    const fill = document.getElementById('time-fill');
+    // Slider position (0-1000) -> year; non-linear so recent decades are not squeezed together
+    const posToYear = p => Math.round(maxY - (maxY - minY) * Math.pow(1 - p / 1000, SCALE_POWER));
+    let pending = false;
+
+    function update(which) {
+      let a = +lo.value, b = +hi.value;
+      if (a > b) { if (which === 'lo') { a = b; lo.value = a; } else { b = a; hi.value = b; } }
+      filter.lo = posToYear(a); filter.hi = posToYear(b); filter.full = (a === 0 && b === 1000);
+      fill.style.left = (a / 10) + '%'; fill.style.width = ((b - a) / 10) + '%';
+      label.textContent = yearLabel(filter.lo) + ' – ' + yearLabel(filter.hi);
+      if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; applyFilter(); }); }
+    }
+
+    lo.disabled = hi.disabled = false;
+    lo.addEventListener('input', () => update('lo'));
+    hi.addEventListener('input', () => update('hi'));
+    update('hi');
+  }
+
+  /* ---------- 9. Start: once the basemap style is ready, load all three layers ---------- */
+  map.on('load', () => {
+    // Start the year slider once every layer has finished (or failed) loading
+    Promise.all(LAYERS.map(loadLayer)).then(initTimeSlider);
+  });
+})();
+</script>
+</body>
+</html>
